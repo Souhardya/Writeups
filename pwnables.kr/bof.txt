@@ -116,7 +116,7 @@ Two things we look forward too in here :)
 
 From this line we can presume that the value 0xdeadbeef would be located in EBP+8 since its the only parameter being passed 
 
-So lets hit a break on this address only :) 
+So lets hit a breakpoint on this address only :) 
 
 ```
 
